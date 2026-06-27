@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Enrollment Form | SCHOOL-DB (JsonPowerDB)</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  body { background: #f3f0ea; font-family: "Segoe UI", Arial, sans-serif; }
+  .form-card {
+    max-width: 620px; margin: 30px auto; background: #fff;
+    border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,0.08); overflow: hidden;
+  }
+  .form-card-header { background: #1f6f5c; color: #fff; padding: 18px 28px; }
+  .form-card-header small { color: #c9e8de; }
+  .form-card-body { padding: 28px; }
+  .mode-badge { font-size: 0.75rem; letter-spacing: 0.04em; padding: 4px 10px; border-radius: 999px; }
+  .mode-new { background: #e6f4ea; color: #1e7e34; }
+  .mode-existing { background: #fff3cd; color: #8a6d00; }
+  .mode-idle { background: #e9ecef; color: #495057; }
+  #statusMsg { min-height: 24px; }
+  .btn-group-actions button { min-width: 110px; }
+  label.required::after { content: " *"; color: #d9534f; }
+  .settings-box {
+    background: #f8f9fb; border: 1px solid #e3e6ea; border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 22px; font-size: 0.85rem;
+  }
+  .settings-box input { font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<div class="form-card">
+  <div class="form-card-header d-flex justify-content-between align-items-center">
+    <div>
+      <h5 class="mb-0">Student Enrollment Form</h5>
+      <small>SCHOOL-DB &rsaquo; STUDENT-TABLE &mdash; powered by JsonPowerDB</small>
+    </div>
+    <span id="modeBadge" class="mode-badge mode-idle">NEW ENTRY</span>
+  </div>
+
+  <div class="form-card-body">
+
+    <!-- JPDB connection settings -->
+    <div class="settings-box">
+      <strong>JsonPowerDB connection</strong>
+      <div class="row g-2 mt-1">
+        <div class="col-md-8">
+          <label class="form-label mb-1">Connection token</label>
+          <input type="text" id="connToken" class="form-control form-control-sm" placeholder="Paste your JPDB connection-token here">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label mb-1">API base URL</label>
+          <input type="text" id="apiBaseUrl" class="form-control form-control-sm" value="http://api.login2explore.com:5577">
+        </div>
+      </div>
+      <div class="form-text mt-1">
+        Get your token from the JPDB Dashboard &rarr; Tools &rarr; Tokens &rarr; Generate Connection Token.
+        The token is saved only in this browser's <code>localStorage</code>.
+        <br><strong>Note:</strong> the JPDB API is served over plain <code>http</code>. If this page is opened over
+        <code>https</code>, the browser will block the request as mixed content &mdash; open this file directly
+        (double-click it) or host it over plain http to avoid that.
+      </div>
+    </div>
+
+    <div id="statusMsg" class="small"></div>
+
+    <form id="studentForm" novalidate>
+      <div class="mb-3">
+        <label for="rollNo" class="form-label required">Roll No.</label>
+        <input type="text" class="form-control" id="rollNo" autocomplete="off" placeholder="Enter Roll No. and press Tab / Enter">
+        <div class="form-text">Type a Roll No., then press <kbd>Tab</kbd> or <kbd>Enter</kbd> to check STUDENT-TABLE.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="fullName" class="form-label required">Full Name</label>
+        <input type="text" class="form-control" id="fullName" disabled>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label for="studentClass" class="form-label required">Class</label>
+          <input type="text" class="form-control" id="studentClass" disabled>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label for="birthDate" class="form-label required">Birth Date</label>
+          <input type="date" class="form-control" id="birthDate" disabled>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label for="address" class="form-label required">Address</label>
+        <textarea class="form-control" id="address" rows="2" disabled></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label for="enrollmentDate" class="form-label required">Enrollment Date</label>
+        <input type="date" class="form-control" id="enrollmentDate" disabled>
+      </div>
+
+      <div class="d-flex gap-2 btn-group-actions">
+        <button type="button" id="btnSave" class="btn btn-success" disabled>Save</button>
+        <button type="button" id="btnUpdate" class="btn btn-primary" disabled>Update</button>
+        <button type="button" id="btnReset" class="btn btn-secondary" disabled>Reset</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+/* =======================================================================
+   JsonPowerDB (JPDB) integration
+   Docs: https://login2explore.com/jpdb/docs.html
+   - GET_BY_KEY (endpoint /api/irl)      -> check / load record by primary key
+   - SET        (endpoint /api/iml/set)  -> insert (type:PUT) or update (type:UPDATE)
+     using "rollNo" as the primaryKey of STUDENT-TABLE.
+======================================================================= */
+const DB_NAME = "SCHOOL-DB";
+const REL_NAME = "STUDENT-TABLE";
+const PRIMARY_KEY = "rollNo";
+
+const elToken = document.getElementById("connToken");
+const elBaseUrl = document.getElementById("apiBaseUrl");
+
+elToken.value = localStorage.getItem("jpdb_conn_token") || "";
+elBaseUrl.value = localStorage.getItem("jpdb_api_base_url") || "http://api.login2explore.com:5577";
+elToken.addEventListener("change", () => localStorage.setItem("jpdb_conn_token", elToken.value.trim()));
+elBaseUrl.addEventListener("change", () => localStorage.setItem("jpdb_api_base_url", elBaseUrl.value.trim()));
+
+async function jpdbCall(endpointPath, payload) {
+  const url = elBaseUrl.value.trim() + endpointPath;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  let json;
+  try {
+    json = await res.json();
+  } catch (e) {
+    throw new Error("JPDB returned a non-JSON response (HTTP " + res.status + ").");
+  }
+  return { ok: res.ok, status: res.status, json: json };
+}
+
+function getByKey(rollValue) {
+  return jpdbCall("/api/irl", {
+    token: elToken.value.trim(),
+    cmd: "GET_BY_KEY",
+    dbName: DB_NAME,
+    rel: REL_NAME,
+    jsonStr: { rollNo: rollValue }
+  });
+}
+
+function setRecord(type, recordObj) {
+  return jpdbCall("/api/iml/set", {
+    token: elToken.value.trim(),
+    cmd: "SET",
+    dbName: DB_NAME,
+    rel: REL_NAME,
+    type: type, // "PUT" for insert, "UPDATE" for update
+    primaryKey: PRIMARY_KEY,
+    jsonStr: recordObj
+  });
+}
+
+// ---- Element references ----
+const elRoll = document.getElementById("rollNo");
+const elName = document.getElementById("fullName");
+const elClass = document.getElementById("studentClass");
+const elBirth = document.getElementById("birthDate");
+const elAddress = document.getElementById("address");
+const elEnroll = document.getElementById("enrollmentDate");
+const dataFields = [elName, elClass, elBirth, elAddress, elEnroll];
+
+const btnSave = document.getElementById("btnSave");
+const btnUpdate = document.getElementById("btnUpdate");
+const btnReset = document.getElementById("btnReset");
+
+const statusMsg = document.getElementById("statusMsg");
+const modeBadge = document.getElementById("modeBadge");
+
+let currentMode = "idle"; // "idle" | "new" | "existing" | "checking"
+
+function setStatus(text, type) {
+  statusMsg.className = "small" + (type ? " text-" + type : "");
+  statusMsg.textContent = text || "";
+}
+
+function setBadge(mode) {
+  modeBadge.classList.remove("mode-idle", "mode-new", "mode-existing");
+  if (mode === "new") { modeBadge.textContent = "NEW RECORD"; modeBadge.classList.add("mode-new"); }
+  else if (mode === "existing") { modeBadge.textContent = "EXISTING RECORD"; modeBadge.classList.add("mode-existing"); }
+  else { modeBadge.textContent = "NEW ENTRY"; modeBadge.classList.add("mode-idle"); }
+}
+
+function resetToStep2() {
+  document.getElementById("studentForm").reset();
+  dataFields.forEach(f => { f.disabled = true; });
+  elRoll.disabled = false;
+  btnSave.disabled = true;
+  btnUpdate.disabled = true;
+  btnReset.disabled = true;
+  currentMode = "idle";
+  setBadge("idle");
+  setStatus("");
+  elRoll.focus();
+}
+
+function validateFields() {
+  for (const f of dataFields) {
+    if (f.value.trim() === "") {
+      f.focus();
+      const label = f.previousElementSibling ? f.previousElementSibling.textContent.replace(" *", "") : f.id;
+      setStatus("Please fill in '" + label + "' before continuing.", "danger");
+      return false;
+    }
+  }
+  return true;
+}
+
+function requireToken() {
+  if (!elToken.value.trim()) {
+    setStatus("Paste your JPDB connection token above before continuing.", "danger");
+    elToken.focus();
+    return false;
+  }
+  return true;
+}
+
+async function handleRollLookup() {
+  const roll = elRoll.value.trim();
+  if (roll === "" || currentMode === "checking") return;
+  if (!requireToken()) return;
+
+  currentMode = "checking";
+  elRoll.disabled = true;
+  setStatus("Checking STUDENT-TABLE for Roll No. " + roll + " ...", "secondary");
+
+  try {
+    const resp = await getByKey(roll);
+
+    if (resp.ok && resp.json.status === 200 && resp.json.data) {
+      const rec = resp.json.data.record || resp.json.data;
+      elName.value = rec.fullName ?? "";
+      elClass.value = rec.studentClass ?? "";
+      elBirth.value = rec.birthDate ?? "";
+      elAddress.value = rec.address ?? "";
+      elEnroll.value = rec.enrollmentDate ?? "";
+
+      dataFields.forEach(f => { f.disabled = false; });
+      elRoll.disabled = true;
+
+      btnSave.disabled = true;
+      btnUpdate.disabled = false;
+      btnReset.disabled = false;
+
+      currentMode = "existing";
+      setBadge("existing");
+      setStatus("Record found for Roll No. " + roll + ". Update the fields and click Update.", "warning");
+      elName.focus();
+    } else {
+      dataFields.forEach(f => { f.disabled = false; f.value = ""; });
+      elRoll.disabled = false;
+
+      btnSave.disabled = false;
+      btnUpdate.disabled = true;
+      btnReset.disabled = false;
+
+      currentMode = "new";
+      setBadge("new");
+      setStatus("New Roll No. Fill in the remaining fields and click Save.", "success");
+      elName.focus();
+    }
+  } catch (err) {
+    elRoll.disabled = false;
+    currentMode = "idle";
+    setStatus("Could not reach JsonPowerDB: " + err.message, "danger");
+  }
+}
+
+elRoll.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); handleRollLookup(); }
+});
+elRoll.addEventListener("blur", handleRollLookup);
+
+btnSave.addEventListener("click", async () => {
+  if (currentMode !== "new") return;
+  if (!validateFields()) return;
+  if (!requireToken()) return;
+
+  const roll = elRoll.value.trim();
+  const record = {
+    rollNo: roll,
+    fullName: elName.value.trim(),
+    studentClass: elClass.value.trim(),
+    birthDate: elBirth.value,
+    address: elAddress.value.trim(),
+    enrollmentDate: elEnroll.value
+  };
+
+  btnSave.disabled = true;
+  setStatus("Saving...", "secondary");
+  try {
+    const resp = await setRecord("PUT", record);
+    if (resp.ok && resp.json.status === 200) {
+      resetToStep2();
+      setStatus("Saved Roll No. " + roll + " to STUDENT-TABLE.", "success");
+    } else {
+      btnSave.disabled = false;
+      setStatus("Save failed: " + (resp.json.message || ("HTTP " + resp.status)), "danger");
+    }
+  } catch (err) {
+    btnSave.disabled = false;
+    setStatus("Could not reach JsonPowerDB: " + err.message, "danger");
+  }
+});
+
+btnUpdate.addEventListener("click", async () => {
+  if (currentMode !== "existing") return;
+  if (!validateFields()) return;
+  if (!requireToken()) return;
+
+  const roll = elRoll.value.trim();
+  const record = {
+    rollNo: roll,
+    fullName: elName.value.trim(),
+    studentClass: elClass.value.trim(),
+    birthDate: elBirth.value,
+    address: elAddress.value.trim(),
+    enrollmentDate: elEnroll.value
+  };
+
+  btnUpdate.disabled = true;
+  setStatus("Updating...", "secondary");
+  try {
+    const resp = await setRecord("UPDATE", record);
+    if (resp.ok && resp.json.status === 200) {
+      resetToStep2();
+      setStatus("Updated Roll No. " + roll + " in STUDENT-TABLE.", "success");
+    } else {
+      btnUpdate.disabled = false;
+      setStatus("Update failed: " + (resp.json.message || ("HTTP " + resp.status)), "danger");
+    }
+  } catch (err) {
+    btnUpdate.disabled = false;
+    setStatus("Could not reach JsonPowerDB: " + err.message, "danger");
+  }
+});
+
+btnReset.addEventListener("click", resetToStep2);
+
+window.addEventListener("DOMContentLoaded", resetToStep2);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
